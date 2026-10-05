@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Room Expense Tracker</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <h1>🏠 Room Expense Tracker</h1>
+      <div class="month-picker">
+        <label for="monthSelect">Month</label>
+        <input type="month" id="monthSelect">
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="dashboard">📊 Dashboard</button>
+      <button class="tab-btn" data-tab="expenses">🧾 Expenses</button>
+      <button class="tab-btn" data-tab="members">👥 Members</button>
+    </nav>
+
+    <main>
+      <!-- DASHBOARD -->
+      <section id="dashboard" class="tab-panel active">
+        <div class="cards" id="summaryCards"></div>
+
+        <div class="grid-2">
+          <div class="panel">
+            <h2>Category Breakdown</h2>
+            <div id="categoryBreakdown" class="breakdown-list"></div>
+          </div>
+          <div class="panel">
+            <h2>Per-Person Summary</h2>
+            <table class="data-table" id="personTable">
+              <thead>
+                <tr><th>Member</th><th>Paid</th><th>Share</th><th>Balance</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>💸 Settle Up</h2>
+          <div id="settlements" class="settlement-list"></div>
+        </div>
+      </section>
+
+      <!-- EXPENSES -->
+      <section id="expenses" class="tab-panel">
+        <div class="panel">
+          <h2>Add Expense</h2>
+          <form id="expenseForm" class="expense-form">
+            <div class="form-row">
+              <label>Category</label>
+              <select id="expCategory" required>
+                <option value="Rent">🏠 Rent</option>
+                <option value="Food">🍚 Food</option>
+                <option value="Other">🛒 Other</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>Amount (₹)</label>
+              <input type="number" id="expAmount" min="0" step="0.01" required placeholder="0.00">
+            </div>
+            <div class="form-row">
+              <label>Paid By</label>
+              <select id="expPaidBy" required></select>
+            </div>
+            <div class="form-row">
+              <label>Note</label>
+              <input type="text" id="expNote" placeholder="optional, e.g. groceries">
+            </div>
+            <div class="form-row">
+              <label>Date</label>
+              <input type="date" id="expDate" required>
+            </div>
+            <button type="submit" class="btn-primary">Add Expense</button>
+          </form>
+        </div>
+
+        <div class="panel">
+          <h2>Expenses This Month</h2>
+          <table class="data-table" id="expenseTable">
+            <thead>
+              <tr><th>Date</th><th>Category</th><th>Note</th><th>Paid By</th><th>Amount</th><th></th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <p class="empty-hint" id="noExpensesHint" style="display:none;">No expenses added for this month yet.</p>
+        </div>
+      </section>
+
+      <!-- MEMBERS -->
+      <section id="members" class="tab-panel">
+        <div class="panel">
+          <h2>Members</h2>
+          <p class="hint">Expenses are split equally across all members below.</p>
+          <ul class="member-list" id="memberList"></ul>
+          <form id="memberForm" class="inline-form">
+            <input type="text" id="newMemberName" placeholder="New member name" required>
+            <button type="submit" class="btn-primary">Add Member</button>
+          </form>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
