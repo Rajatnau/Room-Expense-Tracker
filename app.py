@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from datetime import date
 from pathlib import Path
@@ -9,15 +10,34 @@ DB_PATH = BASE_DIR / "expenses.db"
 DEFAULT_MEMBERS = ["Rajat", "Solai", "Jogeswara"]
 CATEGORIES = {"Rent", "Food", "Other"}
 
+DATABASE_URL = (
+    os.environ.get("POSTGRES_URL")
+    or os.environ.get("POSTGRES_URL_NON_POOLING")
+    or os.environ.get("DATABASE_URL")
+)
+IS_POSTGRES = bool(DATABASE_URL)
+
+if IS_POSTGRES:
+    import psycopg2
+    import psycopg2.extras
+
 app = Flask(__name__)
 app.json.sort_keys = False
 
 
+def ph(sql):
+    """Translate `?` placeholders to `%s` when running on Postgres."""
+    return sql.replace("?", "%s") if IS_POSTGRES else sql
+
+
 def get_db():
     if "db" not in g:
-        g.db = sqlite3.connect(DB_PATH)
-        g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA foreign_keys = ON")
+        if IS_POSTGRES:
+            g.db = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+        else:
+            g.db = sqlite3.connect(DB_PATH)
+            g.db.row_factory = sqlite3.Row
+            g.db.execute("PRAGMA foreign_keys = ON")
     return g.db
 
 
@@ -28,32 +48,108 @@ def close_db(exception=None):
         db.close()
 
 
+_initialized = False
+
+
 def init_db():
-    with sqlite3.connect(DB_PATH) as db:
-        db.execute(
-            """CREATE TABLE IF NOT EXISTS members (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE NOT NULL
-            )"""
-        )
-        db.execute(
-            """CREATE TABLE IF NOT EXISTS expenses (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                month TEXT NOT NULL,
-                category TEXT NOT NULL,
-                amount REAL NOT NULL,
-                paid_by INTEGER NOT NULL REFERENCES members(id),
-                note TEXT,
-                date TEXT NOT NULL
-            )"""
-        )
-        existing = db.execute("SELECT COUNT(*) FROM members").fetchone()[0]
-        if existing == 0:
-            db.executemany(
-                "INSERT INTO members (name) VALUES (?)",
-                [(name,) for name in DEFAULT_MEMBERS],
+    global _initialized
+    if _initialized:
+        return
+
+    if IS_POSTGRES:
+        with psycopg2.connect(DATABASE_URL) as db:
+            with db.cursor() as cur:
+                cur.execute(
+                    """CREATE TABLE IF NOT EXISTS members (
+                        id SERIAL PRIMARY KEY,
+                        name TEXT UNIQUE NOT NULL
+                    )"""
+                )
+                cur.execute(
+                    """CREATE TABLE IF NOT EXISTS expenses (
+                        id SERIAL PRIMARY KEY,
+                        month TEXT NOT NULL,
+                        category TEXT NOT NULL,
+                        amount NUMERIC NOT NULL,
+                        paid_by INTEGER NOT NULL REFERENCES members(id),
+                        note TEXT,
+                        date TEXT NOT NULL
+                    )"""
+                )
+                cur.execute("SELECT COUNT(*) AS c FROM members")
+                existing = cur.fetchone()["c"]
+                if existing == 0:
+                    cur.executemany(
+                        "INSERT INTO members (name) VALUES (%s)",
+                        [(name,) for name in DEFAULT_MEMBERS],
+                    )
+            db.commit()
+    else:
+        with sqlite3.connect(DB_PATH) as db:
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS members (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL
+                )"""
             )
-        db.commit()
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS expenses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    month TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    amount REAL NOT NULL,
+                    paid_by INTEGER NOT NULL REFERENCES members(id),
+                    note TEXT,
+                    date TEXT NOT NULL
+                )"""
+            )
+            existing = db.execute("SELECT COUNT(*) FROM members").fetchone()[0]
+            if existing == 0:
+                db.executemany(
+                    "INSERT INTO members (name) VALUES (?)",
+                    [(name,) for name in DEFAULT_MEMBERS],
+                )
+            db.commit()
+
+    _initialized = True
+
+
+@app.before_request
+def ensure_db():
+    init_db()
+
+
+def fetch_all(db, sql, params=()):
+    cur = db.cursor()
+    cur.execute(ph(sql), params)
+    rows = cur.fetchall()
+    cur.close()
+    return [dict(r) for r in rows]
+
+
+def fetch_one(db, sql, params=()):
+    cur = db.cursor()
+    cur.execute(ph(sql), params)
+    row = cur.fetchone()
+    cur.close()
+    return dict(row) if row else None
+
+
+def insert_and_get_id(db, table, columns, values):
+    placeholders = ", ".join(["?"] * len(values))
+    col_list = ", ".join(columns)
+    cur = db.cursor()
+    if IS_POSTGRES:
+        cur.execute(
+            ph(f"INSERT INTO {table} ({col_list}) VALUES ({placeholders}) RETURNING id"),
+            values,
+        )
+        new_id = cur.fetchone()["id"]
+    else:
+        cur.execute(f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})", values)
+        new_id = cur.lastrowid
+    cur.close()
+    return new_id
 
 
 # ---------- Pages ----------
@@ -66,8 +162,8 @@ def index():
 @app.route("/api/members", methods=["GET"])
 def list_members():
     db = get_db()
-    rows = db.execute("SELECT id, name FROM members ORDER BY id").fetchall()
-    return jsonify([dict(r) for r in rows])
+    rows = fetch_all(db, "SELECT id, name FROM members ORDER BY id")
+    return jsonify(rows)
 
 
 @app.route("/api/members", methods=["POST"])
@@ -78,29 +174,27 @@ def add_member():
         return jsonify({"error": "Name is required"}), 400
 
     db = get_db()
-    exists = db.execute("SELECT 1 FROM members WHERE name = ?", (name,)).fetchone()
-    if exists:
+    if fetch_one(db, "SELECT 1 FROM members WHERE name = ?", (name,)):
         return jsonify({"error": "That member already exists"}), 400
 
-    cur = db.execute("INSERT INTO members (name) VALUES (?)", (name,))
+    new_id = insert_and_get_id(db, "members", ["name"], [name])
     db.commit()
-    return jsonify({"id": cur.lastrowid, "name": name}), 201
+    return jsonify({"id": new_id, "name": name}), 201
 
 
 @app.route("/api/members/<int:member_id>", methods=["DELETE"])
 def remove_member(member_id):
     db = get_db()
-    count = db.execute("SELECT COUNT(*) FROM members").fetchone()[0]
-    if count <= 1:
+    count_row = fetch_one(db, "SELECT COUNT(*) AS c FROM members")
+    if count_row["c"] <= 1:
         return jsonify({"error": "At least one member is required"}), 400
 
-    used = db.execute(
-        "SELECT 1 FROM expenses WHERE paid_by = ?", (member_id,)
-    ).fetchone()
-    if used:
+    if fetch_one(db, "SELECT 1 FROM expenses WHERE paid_by = ?", (member_id,)):
         return jsonify({"error": "Cannot remove a member referenced in existing expenses"}), 400
 
-    db.execute("DELETE FROM members WHERE id = ?", (member_id,))
+    cur = db.cursor()
+    cur.execute(ph("DELETE FROM members WHERE id = ?"), (member_id,))
+    cur.close()
     db.commit()
     return "", 204
 
@@ -110,7 +204,8 @@ def remove_member(member_id):
 def list_expenses():
     month = request.args.get("month", date.today().strftime("%Y-%m"))
     db = get_db()
-    rows = db.execute(
+    rows = fetch_all(
+        db,
         """SELECT e.id, e.month, e.category, e.amount, e.note, e.date,
                   m.id AS paid_by_id, m.name AS paid_by_name
            FROM expenses e
@@ -118,8 +213,10 @@ def list_expenses():
            WHERE e.month = ?
            ORDER BY e.date, e.id""",
         (month,),
-    ).fetchall()
-    return jsonify([dict(r) for r in rows])
+    )
+    for r in rows:
+        r["amount"] = float(r["amount"])
+    return jsonify(rows)
 
 
 @app.route("/api/expenses", methods=["POST"])
@@ -147,24 +244,26 @@ def add_expense():
         return jsonify({"error": "Invalid payer"}), 400
 
     db = get_db()
-    member = db.execute("SELECT id FROM members WHERE id = ?", (paid_by,)).fetchone()
-    if not member:
+    if not fetch_one(db, "SELECT id FROM members WHERE id = ?", (paid_by,)):
         return jsonify({"error": "Unknown member"}), 400
 
     month = expense_date[:7]
-    cur = db.execute(
-        """INSERT INTO expenses (month, category, amount, paid_by, note, date)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (month, category, amount, paid_by, note, expense_date),
+    new_id = insert_and_get_id(
+        db,
+        "expenses",
+        ["month", "category", "amount", "paid_by", "note", "date"],
+        [month, category, amount, paid_by, note, expense_date],
     )
     db.commit()
-    return jsonify({"id": cur.lastrowid, "month": month}), 201
+    return jsonify({"id": new_id, "month": month}), 201
 
 
 @app.route("/api/expenses/<int:expense_id>", methods=["DELETE"])
 def remove_expense(expense_id):
     db = get_db()
-    db.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
+    cur = db.cursor()
+    cur.execute(ph("DELETE FROM expenses WHERE id = ?"), (expense_id,))
+    cur.close()
     db.commit()
     return "", 204
 
@@ -175,20 +274,20 @@ def dashboard():
     month = request.args.get("month", date.today().strftime("%Y-%m"))
     db = get_db()
 
-    members = db.execute("SELECT id, name FROM members ORDER BY id").fetchall()
-    expenses = db.execute(
-        "SELECT category, amount, paid_by FROM expenses WHERE month = ?", (month,)
-    ).fetchall()
+    members = fetch_all(db, "SELECT id, name FROM members ORDER BY id")
+    expenses = fetch_all(
+        db, "SELECT category, amount, paid_by FROM expenses WHERE month = ?", (month,)
+    )
 
-    total = sum(e["amount"] for e in expenses)
+    total = sum(float(e["amount"]) for e in expenses)
     by_category = {"Rent": 0.0, "Food": 0.0, "Other": 0.0}
     for e in expenses:
-        by_category[e["category"]] += e["amount"]
+        by_category[e["category"]] += float(e["amount"])
 
     share = total / len(members) if members else 0.0
     paid = {m["id"]: 0.0 for m in members}
     for e in expenses:
-        paid[e["paid_by"]] = paid.get(e["paid_by"], 0.0) + e["amount"]
+        paid[e["paid_by"]] = paid.get(e["paid_by"], 0.0) + float(e["amount"])
 
     balances = [
         {
@@ -233,8 +332,6 @@ def dashboard():
         }
     )
 
-
-init_db()
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
