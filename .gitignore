@@ -3,3 +3,6 @@ __pycache__/
 expenses.db
 .venv/
 venv/
+.vercel
+.env
+.env.local
