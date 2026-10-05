@@ -57,7 +57,7 @@ def init_db():
         return
 
     if IS_POSTGRES:
-        with psycopg2.connect(DATABASE_URL) as db:
+        with psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor) as db:
             with db.cursor() as cur:
                 cur.execute(
                     """CREATE TABLE IF NOT EXISTS members (
