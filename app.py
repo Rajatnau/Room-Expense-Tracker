@@ -321,6 +321,19 @@ def dashboard():
         if creditors[j]["amt"] < 0.5:
             j += 1
 
+    # Full pairwise breakdown: for each payer, every other member owes an
+    # equal share of what that payer covered (not netted/minimized).
+    n = len(members)
+    pairwise = []
+    for target in members:
+        target_share = paid.get(target["id"], 0.0) / n if n else 0.0
+        if target_share < 0.5:
+            continue
+        for source in members:
+            if source["id"] == target["id"]:
+                continue
+            pairwise.append({"from": source["name"], "to": target["name"], "amount": target_share})
+
     return jsonify(
         {
             "month": month,
@@ -329,6 +342,7 @@ def dashboard():
             "share": share,
             "balances": balances,
             "settlements": settlements,
+            "pairwise_settlements": pairwise,
         }
     )
 

@@ -257,6 +257,49 @@ function renderSettlements(data) {
   });
 }
 
+function renderPairwiseSettlements(data) {
+  const container = document.getElementById("pairwiseSettlements");
+  container.innerHTML = "";
+
+  if (!data.pairwise_settlements.length) {
+    container.innerHTML = '<p class="empty-hint">No expenses recorded for this month.</p>';
+    return;
+  }
+
+  const groups = [];
+  data.pairwise_settlements.forEach((t) => {
+    let group = groups.find((g) => g.to === t.to);
+    if (!group) {
+      group = { to: t.to, rows: [] };
+      groups.push(group);
+    }
+    group.rows.push(t);
+  });
+
+  groups.forEach((group) => {
+    const groupEl = document.createElement("div");
+    groupEl.className = "settlement-group";
+    const heading = document.createElement("div");
+    heading.className = "settlement-group-heading";
+    heading.textContent = `Owed to ${group.to}`;
+    groupEl.appendChild(heading);
+
+    group.rows.forEach((t) => {
+      const row = document.createElement("div");
+      row.className = "settlement-row";
+      row.innerHTML = `
+        <span>${t.from}</span>
+        <span class="arrow">→</span>
+        <span>${t.to}</span>
+        <span class="amt">${currencyFmt(t.amount)}</span>
+      `;
+      groupEl.appendChild(row);
+    });
+
+    container.appendChild(groupEl);
+  });
+}
+
 async function renderDashboard() {
   const month = getSelectedMonth();
   const data = await api(`/api/dashboard?month=${encodeURIComponent(month)}`);
@@ -264,6 +307,7 @@ async function renderDashboard() {
   renderCategoryBreakdown(data);
   renderPersonTable(data);
   renderSettlements(data);
+  renderPairwiseSettlements(data);
 }
 
 // ---------- Render all ----------

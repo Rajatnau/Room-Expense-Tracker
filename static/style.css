@@ -222,6 +222,16 @@ body {
 .settlement-row .arrow { color: var(--muted); }
 .settlement-row .amt { margin-left: auto; font-weight: 600; }
 
+.settlement-groups { display: flex; flex-direction: column; gap: 16px; }
+.settlement-group { display: flex; flex-direction: column; gap: 8px; }
+.settlement-group-heading {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
 .expense-form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
