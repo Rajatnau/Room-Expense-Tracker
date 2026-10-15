@@ -22,6 +22,10 @@
     --muted: #9aa0a6;
     --border: #2a2f37;
   }
+
+  input[type="month"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+  }
 }
 
 * { box-sizing: border-box; }
