@@ -23,7 +23,8 @@
     --border: #2a2f37;
   }
 
-  input[type="month"]::-webkit-calendar-picker-indicator {
+  input[type="month"]::-webkit-calendar-picker-indicator,
+  input[type="date"]::-webkit-calendar-picker-indicator {
     filter: invert(1);
   }
 }
